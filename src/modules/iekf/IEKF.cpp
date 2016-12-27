@@ -517,9 +517,6 @@ void IEKF::correctGps(const vehicle_gps_position_s *msg)
 
 void IEKF::correctAirspeed(const airspeed_s *msg)
 {
-	// XXX remove
-	return;
-
 	// return if no new data
 	float dt = 0;
 
@@ -624,19 +621,20 @@ void IEKF::correctFlow(const optical_flow_s *msg)
 	float agl = _x(X::asl) - _x(X::terrain_asl);
 	float vel_N = _x(X::vel_N);
 	float vel_E = _x(X::vel_E);
+	float vel_D = _x(X::vel_D);
 
 	// expected measurement
 	Vector<float, Y_flow::n> yh;
-	yh(0) = (C_nb(0, 1) * vel_N + C_nb(1, 1) * vel_E) * C_nb(2, 2) / agl + omega_nb_b(0);
-	yh(1) = (C_nb(0, 0) * vel_N + C_nb(1, 0) * vel_E) * C_nb(2, 2) / agl + omega_nb_b(1);
+	yh(0) = - (C_nb(0, 1) * vel_N + C_nb(1, 1) * vel_E + C_nb(2, 1) * vel_D) * C_nb(2, 2) / agl + omega_nb_b(1);
+	yh(1) = - (C_nb(0, 0) * vel_N + C_nb(1, 0) * vel_E + C_nb(2, 0) * vel_D) * C_nb(2, 2) / agl + omega_nb_b(0);
 
 	// measurement
 	Vector<float, Y_flow::n> y;
 	float flow_dt = msg->integration_timespan / 1.0e6f;
-	y(0) = -msg->pixel_flow_x_integral / flow_dt;
-	y(1) = -msg->pixel_flow_y_integral / flow_dt;
+	y(0) = msg->pixel_flow_y_integral / flow_dt;
+	y(1) = msg->pixel_flow_x_integral / flow_dt;
 
-	ROS_INFO("flow X %10.4f Y %10.4f", double(y(0)), double(y(1)));
+	//ROS_INFO("flow X %10.4f Y %10.4f", double(y(0)), double(y(1)));
 	//ROS_INFO("vel N %10.4f E %10.4f", double(vel_N), double(vel_E));
 
 	// residual
@@ -646,44 +644,55 @@ void IEKF::correctFlow(const optical_flow_s *msg)
 
 	// define R
 	Matrix<float, Y_flow::n, Y_flow::n> R;
-	R(Y_flow::flowX, Y_flow::flowX) = 0.001f / dt;
-	R(Y_flow::flowY, Y_flow::flowY) = 0.001f / dt;
+	R(Y_flow::flowX, Y_flow::flowX) = 1e-3f / dt;
+	R(Y_flow::flowY, Y_flow::flowY) = 1e-3f / dt;
 
 	// define H
 	// Note: this measurement is not invariant due to
 	// rotation matrix
 	Matrix<float, Y_flow::n, Xe::n> H;
 	float x0 = 1 / agl;
-	float x1 = 2 * x0;
-	float x2 = C_nb(2, 1) * C_nb(2, 2);
-	float x3 = C_nb(0, 1) * vel_N + C_nb(1, 1) * vel_E;
-	float x4 = 2 * C_nb(2, 2) * x0;
-	float x5 = C_nb(2, 2) * x0;
-	float x6 = C_nb(2, 2) / agl / agl;
-	float x7 = x3 * x6;
-	float x8 = C_nb(2, 0) * C_nb(2, 2);
-	float x9 = C_nb(0, 0) * vel_N + C_nb(1, 0) * vel_E;
-	float x10 = x6 * x9;
-	H(Y_flow::flowX, Xe::rot_N) = x1 * (C_nb(1, 2) * x3 - vel_E * x2);
-	H(Y_flow::flowX, Xe::rot_E) = x1 * (-C_nb(0, 2) * x3 + vel_N * x2);
-	H(Y_flow::flowX, Xe::rot_D) = x4 * (C_nb(0, 1) * vel_E - C_nb(1, 1) * vel_N);
-	H(Y_flow::flowX, Xe::vel_N) = C_nb(0, 1) * x5;
-	H(Y_flow::flowX, Xe::vel_E) = C_nb(1, 1) * x5;
+	float x1 = 2 * C_nb(1, 2);
+	float x2 = C_nb(0, 1) * vel_N;
+	float x3 = C_nb(1, 1) * vel_E;
+	float x4 = 2 * C_nb(2, 2) * vel_D;
+	float x5 = C_nb(2, 1) * vel_D;
+	float x6 = 2 * C_nb(2, 2) * vel_E;
+	float x7 = 2 * x0;
+	float x8 = C_nb(2, 2) * vel_D;
+	float x9 = C_nb(2, 2) * vel_N;
+	float x10 = 2 * C_nb(2, 2) * x0;
+	float x11 = C_nb(2, 2) * x0;
+	float x12 = C_nb(2, 2) / agl / agl;
+	float x13 = x12 * (x2 + x3 + x5);
+	float x14 = C_nb(0, 0) * vel_N;
+	float x15 = C_nb(1, 0) * vel_E;
+	float x16 = C_nb(2, 0) * vel_D;
+	float x17 = x12 * (x14 + x15 + x16);
+	H(Y_flow::flowX, Xe::rot_N) = x0 * (-C_nb(1, 1) * x4 + C_nb(2, 1) * x6 - x1 * x2 - x1 * x3 - x1 * x5);
+	H(Y_flow::flowX, Xe::rot_E) = x7 * (C_nb(0, 1) * x8 + C_nb(0, 2) * x2 + C_nb(0, 2) * x3 + C_nb(0, 2) * x5 - C_nb(2,
+					    1) * x9);
+	H(Y_flow::flowX, Xe::rot_D) = -x10 * (C_nb(0, 1) * vel_E - C_nb(1, 1) * vel_N);
+	H(Y_flow::flowX, Xe::vel_N) = -C_nb(0, 1) * x11;
+	H(Y_flow::flowX, Xe::vel_E) = -C_nb(1, 1) * x11;
+	H(Y_flow::flowX, Xe::vel_D) = -C_nb(2, 1) * x11;
 	H(Y_flow::flowX, Xe::gyro_bias_N) = -C_nb(0, 0);
 	H(Y_flow::flowX, Xe::gyro_bias_E) = -C_nb(1, 0);
 	H(Y_flow::flowX, Xe::gyro_bias_D) = -C_nb(2, 0);
-	H(Y_flow::flowX, Xe::asl) = -x7;
-	H(Y_flow::flowX, Xe::terrain_asl) = x7;
-	H(Y_flow::flowY, Xe::rot_N) = x1 * (C_nb(1, 2) * x9 - vel_E * x8);
-	H(Y_flow::flowY, Xe::rot_E) = x1 * (-C_nb(0, 2) * x9 + vel_N * x8);
-	H(Y_flow::flowY, Xe::rot_D) = x4 * (C_nb(0, 0) * vel_E - C_nb(1, 0) * vel_N);
-	H(Y_flow::flowY, Xe::vel_N) = C_nb(0, 0) * x5;
-	H(Y_flow::flowY, Xe::vel_E) = C_nb(1, 0) * x5;
-	H(Y_flow::flowY, Xe::gyro_bias_N) = -C_nb(0, 1);
-	H(Y_flow::flowY, Xe::gyro_bias_E) = -C_nb(1, 1);
-	H(Y_flow::flowY, Xe::gyro_bias_D) = -C_nb(2, 1);
-	H(Y_flow::flowY, Xe::asl) = -x10;
-	H(Y_flow::flowY, Xe::terrain_asl) = x10;
+	H(Y_flow::flowX, Xe::asl) = x13;
+	H(Y_flow::flowX, Xe::terrain_asl) = -x13;
+	H(Y_flow::flowY, Xe::rot_N) = x0 * (-C_nb(1, 0) * x4 + C_nb(2, 0) * x6 - x1 * x14 - x1 * x15 - x1 * x16);
+	H(Y_flow::flowY, Xe::rot_E) = x7 * (C_nb(0, 0) * x8 + C_nb(0, 2) * x14 + C_nb(0, 2) * x15 + C_nb(0, 2) * x16 - C_nb(2,
+					    0) * x9);
+	H(Y_flow::flowY, Xe::rot_D) = -x10 * (C_nb(0, 0) * vel_E - C_nb(1, 0) * vel_N);
+	H(Y_flow::flowY, Xe::vel_N) = -C_nb(0, 0) * x11;
+	H(Y_flow::flowY, Xe::vel_E) = -C_nb(1, 0) * x11;
+	H(Y_flow::flowY, Xe::vel_D) = -C_nb(2, 0) * x11;
+	H(Y_flow::flowY, Xe::gyro_bias_N) = C_nb(0, 1);
+	H(Y_flow::flowY, Xe::gyro_bias_E) = C_nb(1, 1);
+	H(Y_flow::flowY, Xe::gyro_bias_D) = C_nb(2, 1);
+	H(Y_flow::flowY, Xe::asl) = x17;
+	H(Y_flow::flowY, Xe::terrain_asl) = -x17;
 
 	// kalman correction
 	Vector<float, Xe::n> dxe;
