@@ -1,6 +1,6 @@
 #include <stdlib.h>
 #include <px4_log.h>
-#ifdef __PX4_POSIX
+#if defined(__PX4_POSIX) && !defined(ANDROID)
 #include <execinfo.h>
 #endif
 #include <uORB/uORB.h>
@@ -33,7 +33,7 @@ void px4_log_initialize(void)
 
 void px4_backtrace()
 {
-#ifdef __PX4_POSIX
+#if defined(__PX4_POSIX) && !defined(ANDROID)
 	void *buffer[10];
 	char **callstack;
 	int bt_size;

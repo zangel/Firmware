@@ -13,9 +13,11 @@ except:
     old_header = ''
 
 git_tag = subprocess.check_output('git describe --always --tags'.split(),
-                                  stderr=subprocess.STDOUT).decode('utf-8').strip()
+                                  stderr=subprocess.STDOUT,
+								  shell=True).decode('utf-8').strip()
 git_version = subprocess.check_output('git rev-parse --verify HEAD'.split(),
-                                      stderr=subprocess.STDOUT).decode('utf-8').strip()
+                                      stderr=subprocess.STDOUT,
+									  shell=True).decode('utf-8').strip()
 git_version_short = git_version[0:16]
 
 # Generate the header file content

@@ -131,7 +131,7 @@ extern "C" {
 				const unsigned NAMELEN = 32;
 				char thread_name[NAMELEN] = {};
 
-#ifndef __PX4_QURT
+#if !defined(__PX4_QURT) && !defined(ANDROID)
 				int nret = pthread_getname_np(pthread_self(), thread_name, NAMELEN);
 
 				if (nret || thread_name[0] == 0) {
@@ -264,7 +264,7 @@ extern "C" {
 		const unsigned NAMELEN = 32;
 		char thread_name[NAMELEN] = {};
 
-#ifndef __PX4_QURT
+#if !defined(__PX4_QURT) && !defined(ANDROID)
 		int nret = pthread_getname_np(pthread_self(), thread_name, NAMELEN);
 
 		if (nret || thread_name[0] == 0) {

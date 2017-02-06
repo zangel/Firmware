@@ -68,6 +68,34 @@
 pthread_t _shell_task_id = 0;
 pthread_mutex_t task_mutex = PTHREAD_MUTEX_INITIALIZER;
 
+#if defined(ANDROID)
+
+void pthread_cancel_handler(int sig)
+{
+  if(sig == SIGUSR1)
+  {
+    ::pthread_exit(0);
+  }
+}
+
+bool pthread_cancel_handler_installed = false;
+
+int pthread_cancel(pthread_t tid)
+{
+  if(!pthread_cancel_handler_installed)
+  {
+    struct sigaction actions;
+    ::memset(&actions, 0, sizeof(actions));
+    ::sigemptyset(&actions.sa_mask);
+    actions.sa_flags = 0;
+    actions.sa_handler = pthread_cancel_handler;
+    ::sigaction(SIGUSR1, &actions, nullptr);
+    pthread_cancel_handler_installed = true;
+  }
+  return ::pthread_kill(tid, SIGUSR1);
+}
+#endif
+
 struct task_entry {
 	pthread_t pid;
 	std::string name;
@@ -194,6 +222,7 @@ px4_task_t px4_task_spawn_cmd(const char *name, int scheduler, int priority, int
 
 #endif
 
+#if !defined(ANDROID)
 	rv = pthread_attr_setinheritsched(&attr, PTHREAD_EXPLICIT_SCHED);
 
 	if (rv != 0) {
@@ -202,6 +231,7 @@ px4_task_t px4_task_spawn_cmd(const char *name, int scheduler, int priority, int
 		free(taskdata);
 		return (rv < 0) ? rv : -rv;
 	}
+#endif
 
 	rv = pthread_attr_setschedpolicy(&attr, scheduler);
 

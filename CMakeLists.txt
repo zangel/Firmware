@@ -141,7 +141,8 @@ set(CMAKE_BUILD_TYPE "" CACHE STRING "build type")
 set_property(CACHE CMAKE_BUILD_TYPE PROPERTY
 	STRINGS ";Debug;Release;RelWithDebInfo;MinSizeRel")
 set(CONFIG "posix_sitl_default" CACHE STRING "desired configuration")
-file(GLOB_RECURSE configs RELATIVE cmake/configs "cmake/configs/*.cmake")
+file(GLOB_RECURSE configs RELATIVE ${CMAKE_CURRENT_SOURCE_DIR}/cmake/configs "${CMAKE_CURRENT_SOURCE_DIR}/cmake/configs/*.cmake")
+string(REPLACE ".cmake" "" configs "${configs}")
 set_property(CACHE CONFIG PROPERTY STRINGS ${configs})
 set(THREADS "4" CACHE STRING
 	"number of threads to use for external build processes")

@@ -256,6 +256,9 @@ elseif ("${BOARD}" STREQUAL "rpi" AND "$ENV{RPI_USE_CLANG}" STREQUAL "1")
 	set(added_c_flags ${POSIX_CMAKE_C_FLAGS} ${clang_added_flags})
 	list(APPEND added_cxx_flags ${POSIX_CMAKE_CXX_FLAGS} ${clang_added_flags})
 	list(APPEND added_exe_linker_flags ${POSIX_CMAKE_EXE_LINKER_FLAGS} ${clang_added_flags})
+
+elseif ("${BOARD}" STREQUAL "android")
+	set(added_exe_linker_flags ${CMAKE_EXE_LINKER_FLAGS})
 else()
 	# Add the toolchain specific flags
         set(added_cflags ${POSIX_CMAKE_C_FLAGS})

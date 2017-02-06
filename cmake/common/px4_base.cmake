@@ -143,7 +143,7 @@ function(px4_add_git_submodule)
 	string(REPLACE "/" "_" NAME ${PATH})
 	add_custom_command(OUTPUT ${PX4_BINARY_DIR}/git_init_${NAME}.stamp
 		WORKING_DIRECTORY ${PX4_SOURCE_DIR}
-		COMMAND touch ${PX4_BINARY_DIR}/git_init_${NAME}.stamp
+		COMMAND ${CMAKE_COMMAND} -E touch ${PX4_BINARY_DIR}/git_init_${NAME}.stamp
 		DEPENDS ${PX4_SOURCE_DIR}/.gitmodules
 		)
 	add_custom_target(${TARGET}
@@ -851,7 +851,7 @@ function(px4_add_common_flags)
 		${added_target_definitions}
 		)
 
-	if (NOT (APPLE AND (${CMAKE_C_COMPILER_ID} MATCHES ".*Clang.*")))
+	if (NOT (ANDROID OR (APPLE AND (${CMAKE_C_COMPILER_ID} MATCHES ".*Clang.*"))))
 		set(added_exe_linker_flags
 			-Wl,--warn-common
 			-Wl,--gc-sections

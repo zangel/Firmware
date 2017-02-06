@@ -46,6 +46,7 @@
 #include <fcntl.h>
 #include <poll.h>
 #include <stdint.h>
+#include <sys/stat.h>
 
 #if defined(__PX4_QURT)
 #include <dspal_types.h>

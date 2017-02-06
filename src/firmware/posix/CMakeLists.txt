@@ -105,6 +105,20 @@ elseif ("${BOARD}" STREQUAL "sitl")
 
 	include(./sitl_target.cmake)
 
+elseif ("${BOARD}" STREQUAL "android")
+
+	px4_add_executable(${APP_NAME}
+		${MAIN_SRC}
+		apps.cpp
+		)
+
+	target_link_libraries(${APP_NAME}
+			-Wl,--start-group
+			${module_libraries}
+			${df_driver_libs}
+			m
+			-Wl,--end-group
+			)
 else()
 
 	px4_add_executable(${APP_NAME}

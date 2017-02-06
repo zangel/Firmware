@@ -61,6 +61,8 @@
 # define BOARD_NAME "RPI"
 #elif defined(CONFIG_ARCH_BOARD_BEBOP)
 # define BOARD_NAME "BEBOP"
+#elif defined(CONFIG_ARCH_BOARD_ANDROID)
+# define BOARD_NAME "ANDROID"
 #else
 # include "board_config.h"
 # ifndef BOARD_NAME

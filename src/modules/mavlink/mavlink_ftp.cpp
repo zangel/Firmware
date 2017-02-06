@@ -45,6 +45,13 @@
 #include "mavlink_main.h"
 #include "mavlink_tests/mavlink_ftp_test.h"
 
+#if defined(ANDROID)
+void seekdir(DIR *dir, long loc)
+{
+  (void)::lseek(::dirfd(dir), loc, SEEK_SET);
+}
+#endif
+
 // Uncomment the line below to get better debug output. Never commit with this left on.
 //#define MAVLINK_FTP_DEBUG
 
