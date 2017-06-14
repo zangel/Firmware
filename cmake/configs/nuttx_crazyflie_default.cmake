@@ -70,12 +70,12 @@ set(config_module_list
 	#
 	# Logging
 	#
-	modules/sdlog2
+	modules/logger
 
 	#
 	# Library modules
 	#
-	modules/param
+	modules/systemlib/param
 	modules/systemlib
 	modules/systemlib/mixer
 	modules/uORB

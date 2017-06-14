@@ -171,7 +171,6 @@ function(px4_os_add_flags)
         set(PX4_BASE )
         set(added_include_dirs
 		src/modules/systemlib
-                src/lib/eigen
                 src/platforms/posix/include
                 mavlink/include/mavlink
                 )
@@ -183,7 +182,6 @@ if(UNIX AND APPLE)
 		-D__PX4_DARWIN
 		-D__DF_DARWIN
 		-Dnoreturn_function=__attribute__\(\(noreturn\)\)
-		-include ${PX4_INCLUDE_DIR}visibility.h
                 )
 
 	set(added_cxx_flags)
@@ -210,7 +208,6 @@ else()
 		-D__PX4_LINUX
 		-D__DF_LINUX
 		-Dnoreturn_function=__attribute__\(\(noreturn\)\)
-		-include ${PX4_INCLUDE_DIR}visibility.h
                 )
 
 	# Use -pthread For linux/g++.
@@ -223,7 +220,7 @@ endif()
 set(added_exe_linker_flags)
 
 # This block sets added_c_flags (appends to others).
-if ("${BOARD}" STREQUAL "eagle" OR "${BOARD}" STREQUAL "excelsior")
+if ("${BOARD}" STREQUAL "eagle")
 
 	if ("$ENV{HEXAGON_ARM_SYSROOT}" STREQUAL "")
 		message(FATAL_ERROR "HEXAGON_ARM_SYSROOT not set")
@@ -240,29 +237,68 @@ if ("${BOARD}" STREQUAL "eagle" OR "${BOARD}" STREQUAL "excelsior")
 		)
 
 	list(APPEND added_exe_linker_flags
-		-Wl,-rpath-link,${HEXAGON_ARM_SYSROOT}/usr/lib/arm-linux-gnueabihf
-		-Wl,-rpath-link,${HEXAGON_ARM_SYSROOT}/lib/arm-linux-gnueabihf
+		-Wl,-rpath-link,${HEXAGON_ARM_SYSROOT}/usr/lib
+		-Wl,-rpath-link,${HEXAGON_ARM_SYSROOT}/lib
 		--sysroot=${HEXAGON_ARM_SYSROOT}
 		)
-elseif ("${BOARD}" STREQUAL "rpi" AND "$ENV{RPI_USE_CLANG}" STREQUAL "1")
+# This block sets added_c_flags (appends to others).
+elseif ("${BOARD}" STREQUAL "excelsior")
+
+	if ("$ENV{HEXAGON_ARM_SYSROOT}" STREQUAL "")
+		message(FATAL_ERROR "HEXAGON_ARM_SYSROOT not set")
+	else()
+		set(HEXAGON_ARM_SYSROOT $ENV{HEXAGON_ARM_SYSROOT})
+	endif()
 
 	# Add the toolchain specific flags
-	set(clang_added_flags
-		-m32
-		--target=arm-linux-gnueabihf
-		-ccc-gcc-name arm-linux-gnueabihf
-		--sysroot=${RPI_TOOLCHAIN_DIR}/gcc-linaro-arm-linux-gnueabihf-raspbian/arm-linux-gnueabihf/libc/)
 
-	set(added_c_flags ${POSIX_CMAKE_C_FLAGS} ${clang_added_flags})
-	list(APPEND added_cxx_flags ${POSIX_CMAKE_CXX_FLAGS} ${clang_added_flags})
-	list(APPEND added_exe_linker_flags ${POSIX_CMAKE_EXE_LINKER_FLAGS} ${clang_added_flags})
+        set(added_cflags ${POSIX_CMAKE_C_FLAGS} --sysroot=${HEXAGON_ARM_SYSROOT}/lib32-apq8096  -mfloat-abi=softfp -mfpu=neon -mthumb-interwork)
 
+	list(APPEND added_cxx_flags
+		${POSIX_CMAKE_CXX_FLAGS}
+		--sysroot=${HEXAGON_ARM_SYSROOT}/lib32-apq8096  -mfloat-abi=softfp -mfpu=neon -mthumb-interwork
+
+		)
+
+	list(APPEND added_exe_linker_flags
+		-Wl,-rpath-link,${HEXAGON_ARM_SYSROOT}/lib32-apq8096/usr/lib
+		-Wl,-rpath-link,${HEXAGON_ARM_SYSROOT}/lib32-apq8096/lib
+
+		--sysroot=${HEXAGON_ARM_SYSROOT}/lib32-apq8096  -mfloat-abi=softfp -mfpu=neon -mthumb-interwork
+
+		)
+elseif ("${BOARD}" STREQUAL "rpi")
+	SET(RPI_COMPILE_FLAGS
+		-mcpu=cortex-a53
+		-mfpu=neon
+		-mfloat-abi=hard
+	)
+	LIST(APPEND added_c_flags ${RPI_COMPILE_FLAGS})
+	LIST(APPEND added_cxx_flags ${RPI_COMPILE_FLAGS})
+
+	FIND_PROGRAM(CXX_COMPILER_PATH ${CMAKE_CXX_COMPILER})
+
+	GET_FILENAME_COMPONENT(CXX_COMPILER_PATH ${CXX_COMPILER_PATH} DIRECTORY)
+	GET_FILENAME_COMPONENT(CXX_COMPILER_PATH "${CXX_COMPILER_PATH}/../" ABSOLUTE)
+
+	IF ("${CMAKE_C_COMPILER_ID}" STREQUAL "Clang")
+		set(CLANG_COMPILE_FLAGS
+			--target=arm-pc-linux-gnueabihf
+			-ccc-gcc-name arm-linux-gnueabihf-gcc
+			--sysroot=${CXX_COMPILER_PATH}/arm-linux-gnueabihf/libc
+			-I${CXX_COMPILER_PATH}/arm-linux-gnueabihf/libc/usr/include/
+		)
+
+		set(added_c_flags ${POSIX_CMAKE_C_FLAGS} ${CLANG_COMPILE_FLAGS})
+		list(APPEND added_cxx_flags ${POSIX_CMAKE_CXX_FLAGS} ${CLANG_COMPILE_FLAGS})
+		list(APPEND added_exe_linker_flags ${POSIX_CMAKE_EXE_LINKER_FLAGS} ${CLANG_COMPILE_FLAGS}
+			-B${CXX_COMPILER_PATH}/arm-linux-gnueabihf/libc/usr/lib
+			-L${CXX_COMPILER_PATH}/arm-linux-gnueabihf/libc/usr/lib
+		)
+	ENDIF()
 elseif ("${BOARD}" STREQUAL "android")
 	set(added_exe_linker_flags ${CMAKE_EXE_LINKER_FLAGS})
 else()
-	# Add the toolchain specific flags
-        set(added_cflags ${POSIX_CMAKE_C_FLAGS})
-	list(APPEND added_cxx_flags ${POSIX_CMAKE_CXX_FLAGS})
 endif()
 
 	# output

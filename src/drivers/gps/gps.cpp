@@ -1,6 +1,6 @@
 /****************************************************************************
  *
- *   Copyright (c) 2013-2016 PX4 Development Team. All rights reserved.
+ *   Copyright (c) 2013-2017 PX4 Development Team. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -42,12 +42,10 @@
 #endif
 
 
-#ifndef __PX4_QURT
 #include <termios.h>
+
+#ifndef __PX4_QURT
 #include <poll.h>
-#else
-#include <sys/ioctl.h>
-#include <dev_fs_lib_serial.h>
 #endif
 
 
@@ -160,7 +158,7 @@ private:
 	/**
 	 * Worker task: main GPS thread that configures the GPS and parses incoming data, always running
 	 */
-	void task_main(void);
+	void task_main();
 
 	/**
 	 * Set the baudrate of the UART to the GPS
@@ -253,7 +251,8 @@ GPS::GPS(const char *path, gps_driver_mode_t mode, GPSHelper::Interface interfac
 	_interface(interface),
 	_helper(nullptr),
 	_sat_info(nullptr),
-	_report_gps_pos_pub{nullptr},
+	_report_gps_pos{},
+	_report_gps_pos_pub(nullptr),
 	_gps_orb_instance(-1),
 	_p_report_sat_info(nullptr),
 	_report_sat_info_pub(nullptr),
@@ -271,8 +270,6 @@ GPS::GPS(const char *path, gps_driver_mode_t mode, GPSHelper::Interface interfac
 	strncpy(_port, path, sizeof(_port));
 	/* enforce null termination */
 	_port[sizeof(_port) - 1] = '\0';
-
-	memset(&_report_gps_pos, 0, sizeof(_report_gps_pos));
 
 	/* create satellite info data object if requested */
 	if (enable_sat_info) {
@@ -303,15 +300,15 @@ GPS::~GPS()
 	}
 
 	if (_sat_info) {
-		delete(_sat_info);
+		delete (_sat_info);
 	}
 
 	if (_dump_to_device) {
-		delete(_dump_to_device);
+		delete (_dump_to_device);
 	}
 
 	if (_dump_from_device) {
-		delete(_dump_from_device);
+		delete (_dump_from_device);
 	}
 
 }
@@ -320,11 +317,11 @@ int GPS::init()
 {
 
 	char gps_num[2] = {(char)('0' + _gps_num), 0};
-	char *const args[2] = { gps_num, NULL };
+	char *const args[2] = { gps_num, nullptr };
 
 	/* start the GPS driver worker task */
 	_task = px4_task_spawn_cmd("gps", SCHED_DEFAULT,
-				   SCHED_PRIORITY_SLOW_DRIVER, 1400, (px4_main_t)&GPS::task_main_trampoline, args);
+				   SCHED_PRIORITY_SLOW_DRIVER, 1550, (px4_main_t)&GPS::task_main_trampoline, args);
 
 	if (_task < 0) {
 		PX4_WARN("task start failed: %d", errno);
@@ -477,35 +474,6 @@ bool GPS::injectData(uint8_t *data, size_t len)
 
 int GPS::setBaudrate(unsigned baud)
 {
-
-#if __PX4_QURT
-	// TODO: currently QURT does not support configuration with termios.
-	dspal_serial_ioctl_data_rate data_rate;
-
-	switch (baud) {
-	case 9600: data_rate.bit_rate = DSPAL_SIO_BITRATE_9600; break;
-
-	case 19200: data_rate.bit_rate = DSPAL_SIO_BITRATE_19200; break;
-
-	case 38400: data_rate.bit_rate = DSPAL_SIO_BITRATE_38400; break;
-
-	case 57600: data_rate.bit_rate = DSPAL_SIO_BITRATE_57600; break;
-
-	case 115200: data_rate.bit_rate = DSPAL_SIO_BITRATE_115200; break;
-
-	default:
-		PX4_ERR("ERR: unknown baudrate: %d", baud);
-		return -EINVAL;
-	}
-
-	int ret = ::ioctl(_serial_fd, SERIAL_IOCTL_SET_DATA_RATE, (void *)&data_rate);
-
-	if (ret != 0) {
-
-		return ret;
-	}
-
-#else
 	/* process baud rate */
 	int speed;
 
@@ -585,7 +553,6 @@ int GPS::setBaudrate(unsigned baud)
 		return -1;
 	}
 
-#endif
 	return 0;
 }
 
@@ -655,15 +622,17 @@ void GPS::dumpGpsData(uint8_t *data, size_t len, bool msg_to_gps_device)
 void
 GPS::task_main()
 {
-	/* open the serial port */
-	_serial_fd = ::open(_port, O_RDWR | O_NOCTTY);
+	if (!_fake_gps) {
+		/* open the serial port */
+		_serial_fd = ::open(_port, O_RDWR | O_NOCTTY);
 
-	if (_serial_fd < 0) {
-		PX4_ERR("GPS: failed to open serial port: %s err: %d", _port, errno);
+		if (_serial_fd < 0) {
+			PX4_ERR("GPS: failed to open serial port: %s err: %d", _port, errno);
 
-		/* tell the dtor that we are exiting, set error code */
-		_task = -1;
-		px4_task_exit(1);
+			/* tell the dtor that we are exiting, set error code */
+			_task = -1;
+			px4_task_exit(1);
+		}
 	}
 
 	_orb_inject_data_fd = orb_subscribe(ORB_ID(gps_inject_data));
@@ -677,6 +646,7 @@ GPS::task_main()
 	while (!_task_should_exit) {
 
 		if (_fake_gps) {
+			_report_gps_pos = {};
 			_report_gps_pos.timestamp = hrt_absolute_time();
 			_report_gps_pos.lat = (int32_t)47.378301e7f;
 			_report_gps_pos.lon = (int32_t)8.538777e7f;
@@ -692,8 +662,7 @@ GPS::task_main()
 			_report_gps_pos.vel_n_m_s = 0.0f;
 			_report_gps_pos.vel_e_m_s = 0.0f;
 			_report_gps_pos.vel_d_m_s = 0.0f;
-			_report_gps_pos.vel_m_s = sqrtf(_report_gps_pos.vel_n_m_s * _report_gps_pos.vel_n_m_s + _report_gps_pos.vel_e_m_s *
-							_report_gps_pos.vel_e_m_s + _report_gps_pos.vel_d_m_s * _report_gps_pos.vel_d_m_s);
+			_report_gps_pos.vel_m_s = 0.0f;
 			_report_gps_pos.cog_rad = 0.0f;
 			_report_gps_pos.vel_ned_valid = true;
 			_report_gps_pos.satellites_used = 10;
@@ -703,13 +672,12 @@ GPS::task_main()
 
 			publish();
 
-			usleep(2e5);
+			usleep(200000);
 
 		} else {
 
 			if (_helper != nullptr) {
-				delete(_helper);
-				/* set to zero to ensure parser is not used while not instantiated */
+				delete (_helper);
 				_helper = nullptr;
 			}
 
@@ -739,7 +707,7 @@ GPS::task_main()
 			 * MTK driver is not well tested, so we really only trust the UBX
 			 * driver for an advance publication
 			 */
-			if (_helper->configure(_baudrate, GPSHelper::OutputMode::GPS) == 0) {
+			if (_helper && _helper->configure(_baudrate, GPSHelper::OutputMode::GPS) == 0) {
 
 				/* reset report */
 				memset(&_report_gps_pos, 0, sizeof(_report_gps_pos));
@@ -837,11 +805,15 @@ GPS::task_main()
 
 				case GPS_DRIVER_MODE_ASHTECH:
 					_mode = GPS_DRIVER_MODE_UBX;
+					usleep(500000); // tried all possible drivers. Wait a bit before next round
 					break;
 
 				default:
 					break;
 				}
+
+			} else {
+				usleep(500000);
 			}
 
 		}
@@ -1034,7 +1006,6 @@ void
 reset()
 {
 	PX4_ERR("GPS reset not supported");
-	return;
 }
 
 /**
@@ -1054,7 +1025,6 @@ info()
 		g_dev[1]->print_info();
 	}
 
-	return;
 }
 
 void print_usage()

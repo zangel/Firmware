@@ -45,7 +45,6 @@
 
 #include <boot_config.h>
 
-#include <systemlib/visibility.h>
 
 #include <sys/types.h>
 #include <stdint.h>
@@ -72,7 +71,7 @@ typedef enum {
 	Repeating       = modeRepeating,
 	Timeout         = modeTimeout,
 
-	modeMsk         = 0x3 ,
+	modeMsk         = 0x3,
 	running         = modeStarted,
 	inuse           = 0x80,
 

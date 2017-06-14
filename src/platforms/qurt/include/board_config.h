@@ -1,3 +1,5 @@
+#pragma once
+
 /*
  * I2C busses
  */
@@ -8,4 +10,6 @@
 
 #define PX4_I2C_OBDEV_LED	0x55
 
-#define STM32_SYSMEM_UID "SYSMEMID"
+#define BOARD_OVERRIDE_UUID "SYSMEMID"
+
+#include "../common/board_common.h"

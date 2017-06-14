@@ -168,22 +168,27 @@ MPU9250::MPU9250(device::Device *interface, device::Device *mag_interface, const
 
 	/* Set device parameters and make sure parameters of the bus device are adopted */
 	_device_id.devid_s.devtype = DRV_ACC_DEVTYPE_MPU9250;
-	_device_id.devid_s.bus = _interface->get_device_bus();;
-	_device_id.devid_s.address = _interface->get_device_address();;
+	_device_id.devid_s.bus_type = (device::Device::DeviceBusType)_interface->get_device_bus_type();
+	_device_id.devid_s.bus = _interface->get_device_bus();
+	_device_id.devid_s.address = _interface->get_device_address();
 
 	/* Prime _gyro with parents devid. */
 	/* Set device parameters and make sure parameters of the bus device are adopted */
 	_gyro->_device_id.devid = _device_id.devid;
 	_gyro->_device_id.devid_s.devtype = DRV_GYR_DEVTYPE_MPU9250;
+	_gyro->_device_id.devid_s.bus_type = _interface->get_device_bus_type();
 	_gyro->_device_id.devid_s.bus = _interface->get_device_bus();
 	_gyro->_device_id.devid_s.address = _interface->get_device_address();
 
 	/* Prime _mag with parents devid. */
 	_mag->_device_id.devid = _device_id.devid;
 	_mag->_device_id.devid_s.devtype = DRV_MAG_DEVTYPE_MPU9250;
+	_mag->_device_id.devid_s.bus_type = _interface->get_device_bus_type();
+	_mag->_device_id.devid_s.bus = _interface->get_device_bus();
+	_mag->_device_id.devid_s.address = _interface->get_device_address();
 
 	/* For an independent mag, ensure that it is connected to the i2c bus */
-
+	_interface->set_device_type(_device_id.devid_s.devtype);
 
 	// default accel scale factors
 	_accel_scale.x_offset = 0;
@@ -323,7 +328,9 @@ MPU9250::init()
 #endif
 
 	/* do CDev init for the mag device node, keep it optional */
-	ret = _mag->init();
+	if (_whoami == MPU_WHOAMI_9250) {
+		ret = _mag->init();
+	}
 
 	/* if probe/setup failed, bail now */
 	if (ret != OK) {
@@ -364,6 +371,12 @@ out:
 
 int MPU9250::reset()
 {
+	irqstate_t state;
+
+	// Hold off sampling for 60 ms
+	state = px4_enter_critical_section();
+	_reset_wait = hrt_absolute_time() + 60000;
+
 	write_reg(MPUREG_PWR_MGMT_1, BIT_H_RESET);
 	up_udelay(10000);
 
@@ -372,6 +385,14 @@ int MPU9250::reset()
 
 	write_checked_reg(MPUREG_PWR_MGMT_2, 0);
 	up_udelay(1000);
+
+	px4_leave_critical_section(state);
+
+	// Hold off sampling for 30 ms
+
+	state = px4_enter_critical_section();
+	_reset_wait = hrt_absolute_time() + 30000;
+	px4_leave_critical_section(state);
 
 	// SAMPLE RATE
 	_set_sample_rate(_sample_rate);
@@ -445,6 +466,7 @@ MPU9250::probe()
 	// verify product revision
 	switch (_whoami) {
 	case MPU_WHOAMI_9250:
+	case MPU_WHOAMI_6500:
 		memset(_checked_values, 0, sizeof(_checked_values));
 		memset(_checked_bad, 0, sizeof(_checked_bad));
 		_checked_values[0] = _whoami;
@@ -587,31 +609,6 @@ MPU9250::accel_self_test()
 		return 1;
 	}
 
-	/* inspect accel offsets */
-	if (fabsf(_accel_scale.x_offset) < 0.000001f) {
-		return 2;
-	}
-
-	if (fabsf(_accel_scale.x_scale - 1.0f) > 0.4f || fabsf(_accel_scale.x_scale - 1.0f) < 0.000001f) {
-		return 3;
-	}
-
-	if (fabsf(_accel_scale.y_offset) < 0.000001f) {
-		return 4;
-	}
-
-	if (fabsf(_accel_scale.y_scale - 1.0f) > 0.4f || fabsf(_accel_scale.y_scale - 1.0f) < 0.000001f) {
-		return 5;
-	}
-
-	if (fabsf(_accel_scale.z_offset) < 0.000001f) {
-		return 6;
-	}
-
-	if (fabsf(_accel_scale.z_scale - 1.0f) > 0.4f || fabsf(_accel_scale.z_scale - 1.0f) < 0.000001f) {
-		return 7;
-	}
-
 	return 0;
 }
 
@@ -658,14 +655,6 @@ MPU9250::gyro_self_test()
 	}
 
 	if (fabsf(_gyro_scale.z_scale - 1.0f) > max_scale) {
-		return 1;
-	}
-
-	/* check if all scales are zero */
-	if ((fabsf(_gyro_scale.x_offset) < 0.000001f) &&
-	    (fabsf(_gyro_scale.y_offset) < 0.000001f) &&
-	    (fabsf(_gyro_scale.z_offset) < 0.000001f)) {
-		/* if all are zero, this device is not calibrated */
 		return 1;
 	}
 
@@ -1424,6 +1413,9 @@ MPU9250::measure()
 	arb.temperature_raw = report.temp;
 	arb.temperature = _last_temperature;
 
+	/* return device ID */
+	arb.device_id = _device_id.devid;
+
 	grb.x_raw = report.gyro_x;
 	grb.y_raw = report.gyro_y;
 	grb.z_raw = report.gyro_z;
@@ -1456,6 +1448,9 @@ MPU9250::measure()
 
 	grb.temperature_raw = report.temp;
 	grb.temperature = _last_temperature;
+
+	/* return device ID */
+	grb.device_id = _gyro->_device_id.devid;
 
 	_accel_reports->force(&arb);
 	_gyro_reports->force(&grb);

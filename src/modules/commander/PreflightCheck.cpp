@@ -1,6 +1,6 @@
 /****************************************************************************
 *
-*   Copyright (c) 2012-2015 PX4 Development Team. All rights reserved.
+*   Copyright (c) 2012-2017 PX4 Development Team. All rights reserved.
 *
 * Redistribution and use in source and binary forms, with or without
 * modification, are permitted provided that the following conditions
@@ -166,8 +166,11 @@ static bool imuConsistencyCheck(orb_advert_t *mavlink_log_pub, bool checkAcc, bo
 	// get the sensor preflight data
 	int sensors_sub = orb_subscribe(ORB_ID(sensor_preflight));
 	struct sensor_preflight_s sensors = {};
-	orb_copy(ORB_ID(sensor_preflight), sensors_sub, &sensors);
-	px4_close(sensors_sub);
+	if (orb_copy(ORB_ID(sensor_preflight), sensors_sub, &sensors) != 0) {
+		// can happen if not advertised (yet)
+		return true;
+	}
+	orb_unsubscribe(sensors_sub);
 
 	// Use the difference between IMU's to detect a bad calibration. If a single IMU is fitted, the value being checked will be zero so this check will always pass.
 	bool success = true;
@@ -380,9 +383,15 @@ static bool airspeedCheck(orb_advert_t *mavlink_log_pub, bool optional, bool rep
 		goto out;
 	}
 
-	if (fabsf(airspeed.confidence) < 0.99f) {
+	/*
+	 * Check if voter thinks the confidence is low. High-end sensors might have virtually zero noise
+	 * on the bench and trigger false positives of the voter. Therefore only fail this
+	 * for a pre-arm check, as then the cover is off and the natural airflow in the field
+	 * will ensure there is not zero noise.
+	 */
+	if (prearm && fabsf(airspeed.confidence) < 0.95f) {
 		if (report_fail) {
-			mavlink_log_critical(mavlink_log_pub, "PREFLIGHT FAIL: AIRSPEED SENSOR COMM ERROR");
+			mavlink_log_critical(mavlink_log_pub, "PREFLIGHT FAIL: AIRSPEED SENSOR STUCK");
 		}
 		success = false;
 		goto out;
@@ -409,7 +418,7 @@ static bool airspeedCheck(orb_advert_t *mavlink_log_pub, bool optional, bool rep
 	}
 
 out:
-	px4_close(fd);
+	orb_unsubscribe(fd);
 	return success;
 }
 
@@ -441,11 +450,11 @@ static bool gnssCheck(orb_advert_t *mavlink_log_pub, bool report_fail)
 		}
 	}
 
-	px4_close(gpsSub);
+	orb_unsubscribe(gpsSub);
 	return success;
 }
 
-static bool ekf2Check(orb_advert_t *mavlink_log_pub, bool optional, bool report_fail)
+static bool ekf2Check(orb_advert_t *mavlink_log_pub, bool optional, bool report_fail, bool enforce_gps_required)
 {
 	// Get estimator status data if available and exit with a fail recorded if not
 	int sub = orb_subscribe(ORB_ID(estimator_status));
@@ -454,7 +463,6 @@ static bool ekf2Check(orb_advert_t *mavlink_log_pub, bool optional, bool report_
 	struct estimator_status_s status;
 	orb_copy(ORB_ID(estimator_status), sub, &status);
 	orb_unsubscribe(sub);
-	px4_close(sub);
 
 	bool success = true; // start with a pass and change to a fail if any test fails
 	float test_limit; // pass limit re-used for each test
@@ -471,7 +479,7 @@ static bool ekf2Check(orb_advert_t *mavlink_log_pub, bool optional, bool report_
 
 	// check velocity innovation test ratio
 	param_get(param_find("COM_ARM_EKF_VEL"), &test_limit);
-	if (status.hgt_test_ratio > test_limit) {
+	if (status.vel_test_ratio > test_limit) {
 		if (report_fail) {
 			mavlink_log_critical(mavlink_log_pub, "PREFLIGHT FAIL: EKF VEL ERROR");
 		}
@@ -487,6 +495,31 @@ static bool ekf2Check(orb_advert_t *mavlink_log_pub, bool optional, bool report_
 		}
 		success = false;
 		goto out;
+	}
+
+	// If GPS aiding is required, declare fault condition if the EKF is not using GPS
+	if (enforce_gps_required) {
+		if (!(status.control_mode_flags & (1<<2))) {
+			if (report_fail) {
+				mavlink_log_critical(mavlink_log_pub, "PREFLIGHT FAIL: EKF NOT USING GPS");
+			}
+			success = false;
+			goto out;
+		}
+	}
+
+	// If GPS aiding is required, declare fault condition if the required GPS quality checks are failing
+	if (enforce_gps_required) {
+		if ((status.gps_check_fail_flags & ((1 << estimator_status_s::GPS_CHECK_FAIL_MIN_SAT_COUNT)
+						    + (1 << estimator_status_s::GPS_CHECK_FAIL_MIN_GDOP)
+						    + (1 << estimator_status_s::GPS_CHECK_FAIL_MAX_HORZ_ERR)
+						    + (1 << estimator_status_s::GPS_CHECK_FAIL_MAX_VERT_ERR))) > 0) {
+			if (report_fail) {
+				mavlink_log_critical(mavlink_log_pub, "PREFLIGHT FAIL: GPS QUALITY CHECKS");
+			}
+			success = false;
+			goto out;
+		}
 	}
 
 	// check magnetometer innovation test ratio
@@ -534,10 +567,18 @@ bool preflightCheck(orb_advert_t *mavlink_log_pub, bool checkMag, bool checkAcc,
 	PX4_WARN("Preflight checks always pass on Snapdragon.");
 	return true;
 #elif defined(__PX4_POSIX_RPI)
-	PX4_WARN("Preflight checks always pass on RPI.");
-	return true;
+	if (reportFailures) {
+		PX4_WARN("Preflight checks for mag, acc, gyro always pass on RPI");
+	}
+
+	checkMag = false;
+	checkAcc = false;
+	checkGyro = false;
 #elif defined(__PX4_POSIX_BEBOP)
 	PX4_WARN("Preflight checks always pass on Bebop.");
+	return true;
+#elif defined(__PX4_POSIX_OCPOC)
+	PX4_WARN("Preflight checks always pass on OcPoC.");
 	return true;
 #endif
 
@@ -692,7 +733,7 @@ bool preflightCheck(orb_advert_t *mavlink_log_pub, bool checkMag, bool checkAcc,
 	int32_t estimator_type;
 	param_get(param_find("SYS_MC_EST_GROUP"), &estimator_type);
 	if (estimator_type == 2 && checkGNSS) {
-		if (!ekf2Check(mavlink_log_pub, true, reportFailures)) {
+		if (!ekf2Check(mavlink_log_pub, true, reportFailures, checkGNSS)) {
 			failed = true;
 		}
 	}

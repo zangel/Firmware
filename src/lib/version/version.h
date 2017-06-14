@@ -43,31 +43,18 @@
 
 #pragma once
 
+#include <px4_config.h>
+#include <systemlib/px4_macros.h>
 #include <stdint.h>
-
-#define FREEZE_STR(s) #s
-#define STRINGIFY(s) FREEZE_STR(s)
 
 /* The preferred method for publishing a board name is to
  * define it in board_config.h as BOARD_NAME
  */
-#if defined(CONFIG_ARCH_BOARD_SITL)
-# define BOARD_NAME "SITL"
-#elif defined(CONFIG_ARCH_BOARD_EAGLE)
-# define BOARD_NAME "EAGLE"
-#elif defined(CONFIG_ARCH_BOARD_EXCELSIOR)
-# define BOARD_NAME "EXCELSIOR"
-#elif defined(CONFIG_ARCH_BOARD_RPI)
-# define BOARD_NAME "RPI"
-#elif defined(CONFIG_ARCH_BOARD_BEBOP)
-# define BOARD_NAME "BEBOP"
+
 #elif defined(CONFIG_ARCH_BOARD_ANDROID)
 # define BOARD_NAME "ANDROID"
-#else
-# include "board_config.h"
-# ifndef BOARD_NAME
+#ifndef BOARD_NAME
 #  error "board_config.h must define BOARD_NAME"
-# endif
 #endif
 
 
@@ -137,6 +124,11 @@ __EXPORT const char *px4_firmware_version_string(void);
  * Firmware version in binary form (first part of the git tag)
  */
 __EXPORT uint64_t px4_firmware_version_binary(void);
+
+/**
+ * MAVLink lib version in binary form (first part of the git tag)
+ */
+__EXPORT uint64_t px4_mavlink_lib_version_binary(void);
 
 /**
  * Operating system version in binary form (first part of the git tag)

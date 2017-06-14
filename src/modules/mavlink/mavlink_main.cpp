@@ -1,6 +1,6 @@
 /****************************************************************************
  *
- *   Copyright (c) 2012-2016 PX4 Development Team. All rights reserved.
+ *   Copyright (c) 2012-2017 PX4 Development Team. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -71,7 +71,6 @@
 #include <systemlib/err.h>
 #include <systemlib/perf_counter.h>
 #include <systemlib/systemlib.h>
-#include <systemlib/mcu_version.h>
 #include <systemlib/mavlink_log.h>
 #include <geo/geo.h>
 #include <dataman/dataman.h>
@@ -102,6 +101,7 @@
 #define MAX_DATA_RATE				10000000	///< max data rate in bytes/s
 #define MAIN_LOOP_DELAY 			10000	///< 100 Hz @ 1000 bytes/s data rate
 #define FLOW_CONTROL_DISABLE_THRESHOLD		40	///< picked so that some messages still would fit it.
+//#define MAVLINK_PRINT_PACKETS
 
 static Mavlink *_mavlink_instances = nullptr;
 
@@ -120,6 +120,13 @@ void mavlink_send_uart_bytes(mavlink_channel_t chan, const uint8_t *ch, int leng
 
 	if (m != nullptr) {
 		m->send_bytes(ch, length);
+#ifdef MAVLINK_PRINT_PACKETS
+
+		for (unsigned i = 0; i < length; i++) {
+			printf("%02x", (unsigned char)ch[i]);
+		}
+
+#endif
 	}
 }
 
@@ -129,6 +136,9 @@ void mavlink_start_uart_send(mavlink_channel_t chan, int length)
 
 	if (m != nullptr) {
 		(void)m->begin_send();
+#ifdef MAVLINK_PRINT_PACKETS
+		printf("START PACKET (%u): ", (unsigned)chan);
+#endif
 	}
 }
 
@@ -138,6 +148,9 @@ void mavlink_end_uart_send(mavlink_channel_t chan, int length)
 
 	if (m != nullptr) {
 		(void)m->send_packet();
+#ifdef MAVLINK_PRINT_PACKETS
+		printf("\n");
+#endif
 	}
 }
 
@@ -171,7 +184,7 @@ mavlink_message_t *mavlink_get_channel_buffer(uint8_t channel)
 	}
 }
 
-static void usage(void);
+static void usage();
 
 bool Mavlink::_boot_complete = false;
 bool Mavlink::_config_link_on = false;
@@ -195,10 +208,6 @@ Mavlink::Mavlink() :
 	_main_loop_delay(1000),
 	_subscriptions(nullptr),
 	_streams(nullptr),
-	_mission_manager(nullptr),
-	_parameters_manager(nullptr),
-	_mavlink_ftp(nullptr),
-	_mavlink_log_handler(nullptr),
 	_mavlink_shell(nullptr),
 	_mavlink_ulog(nullptr),
 	_mavlink_ulog_stop_requested(false),
@@ -255,7 +264,6 @@ Mavlink::Mavlink() :
 	_message_buffer_mutex {},
 	_send_mutex {},
 	_param_initialized(false),
-	_logging_enabled(false),
 	_broadcast_mode(Mavlink::BROADCAST_MODE_OFF),
 	_param_system_id(PARAM_INVALID),
 	_param_component_id(PARAM_INVALID),
@@ -460,7 +468,7 @@ Mavlink::destroy_all_instances()
 	while (_mavlink_instances) {
 		inst_to_del = _mavlink_instances;
 		LL_DELETE(_mavlink_instances, inst_to_del);
-		delete(inst_to_del);
+		delete inst_to_del;
 	}
 
 	printf("\n");
@@ -554,7 +562,7 @@ Mavlink::get_channel()
 	return _channel;
 }
 
-void Mavlink::mavlink_update_system(void)
+void Mavlink::mavlink_update_system()
 {
 	if (!_param_initialized) {
 		_param_system_id = param_find("MAV_SYS_ID");
@@ -1063,7 +1071,7 @@ Mavlink::find_broadcast_address()
 #else
 	// On Linux, we can determine the required size of the
 	// buffer first by providing NULL to ifc_req.
-	ifconf.ifc_req = NULL;
+	ifconf.ifc_req = nullptr;
 	ifconf.ifc_len = 0;
 
 	ret = ioctl(_socket_fd, SIOCGIFCONF, &ifconf);
@@ -1235,17 +1243,9 @@ Mavlink::handle_message(const mavlink_message_t *msg)
 		return;
 	}
 
-	/* handle packet with mission manager */
-	_mission_manager->handle_message(msg);
-
-	/* handle packet with parameter component */
-	_parameters_manager->handle_message(msg);
-
-	/* handle packet with ftp component */
-	_mavlink_ftp->handle_message(msg);
-
-	/* handle packet with log component */
-	_mavlink_log_handler->handle_message(msg);
+	/*
+	 *  NOTE: this is called from the receiver thread
+	 */
 
 	if (get_forwarding_on()) {
 		/* forward any messages to other mavlink instances */
@@ -1308,12 +1308,33 @@ void Mavlink::send_autopilot_capabilites()
 #else
 		msg.product_id = 0;
 #endif
-		uint32_t uid[3];
-		mcu_unique_id(uid);
-		msg.uid = (((uint64_t)uid[1]) << 32) | uid[2];
+		uuid_uint32_t uid;
+		board_get_uuid32(uid);
+		msg.uid = (((uint64_t)uid[PX4_CPU_UUID_WORD32_UNIQUE_M]) << 32) | uid[PX4_CPU_UUID_WORD32_UNIQUE_H];
 
 		mavlink_msg_autopilot_version_send_struct(get_channel(), &msg);
 	}
+}
+
+void Mavlink::send_protocol_version()
+{
+	mavlink_protocol_version_t msg = {};
+
+	msg.version = _protocol_version * 100;
+	msg.min_version = 100;
+	msg.max_version = 200;
+	uint64_t mavlink_lib_git_version_binary = px4_mavlink_lib_version_binary();
+	// TODO add when available
+	//memcpy(&msg.spec_version_hash, &mavlink_spec_git_version_binary, sizeof(msg.spec_version_hash));
+	memcpy(&msg.library_version_hash, &mavlink_lib_git_version_binary, sizeof(msg.library_version_hash));
+
+	// Switch to MAVLink 2
+	int curr_proto_ver = _protocol_version;
+	set_proto_version(2);
+	// Send response - if it passes through the link its fine to use MAVLink 2
+	mavlink_msg_protocol_version_send_struct(get_channel(), &msg);
+	// Reset to previous value
+	set_proto_version(curr_proto_ver);
 }
 
 MavlinkOrbSubscription *Mavlink::add_orb_subscription(const orb_id_t topic, int instance)
@@ -1456,7 +1477,7 @@ Mavlink::message_buffer_init(int size)
 
 	int ret;
 
-	if (_message_buffer.data == 0) {
+	if (_message_buffer.data == nullptr) {
 		ret = PX4_ERROR;
 		_message_buffer.size = 0;
 
@@ -1719,7 +1740,7 @@ Mavlink::task_main(int argc, char *argv[])
 	 * set error flag instead */
 	bool err_flag = false;
 	int myoptind = 1;
-	const char *myoptarg = NULL;
+	const char *myoptarg = nullptr;
 #ifdef __PX4_POSIX
 	char *eptr;
 	int temp_int_arg;
@@ -1728,7 +1749,7 @@ Mavlink::task_main(int argc, char *argv[])
 	while ((ch = px4_getopt(argc, argv, "b:r:d:u:o:m:t:fpvwx", &myoptind, &myoptarg)) != EOF) {
 		switch (ch) {
 		case 'b':
-			_baudrate = strtoul(myoptarg, NULL, 10);
+			_baudrate = strtoul(myoptarg, nullptr, 10);
 
 			if (_baudrate < 9600 || _baudrate > 3000000) {
 				warnx("invalid baud rate '%s'", myoptarg);
@@ -1738,7 +1759,7 @@ Mavlink::task_main(int argc, char *argv[])
 			break;
 
 		case 'r':
-			_datarate = strtoul(myoptarg, NULL, 10);
+			_datarate = strtoul(myoptarg, nullptr, 10);
 
 			if (_datarate < 10 || _datarate > MAX_DATA_RATE) {
 				warnx("invalid data rate '%s'", myoptarg);
@@ -1906,7 +1927,7 @@ Mavlink::task_main(int argc, char *argv[])
 	}
 
 	/* initialize send mutex */
-	pthread_mutex_init(&_send_mutex, NULL);
+	pthread_mutex_init(&_send_mutex, nullptr);
 
 	/* if we are passing on mavlink messages, we need to prepare a buffer for this instance */
 	if (_forwarding_on || _ftp_on) {
@@ -1920,7 +1941,7 @@ Mavlink::task_main(int argc, char *argv[])
 		}
 
 		/* initialize message buffer mutex */
-		pthread_mutex_init(&_message_buffer_mutex, NULL);
+		pthread_mutex_init(&_message_buffer_mutex, nullptr);
 	}
 
 	/* Initialize system properties */
@@ -1961,29 +1982,6 @@ Mavlink::task_main(int argc, char *argv[])
 
 	}
 
-	/* PARAM_VALUE stream */
-	_parameters_manager = (MavlinkParametersManager *) MavlinkParametersManager::new_instance(this);
-	_parameters_manager->set_interval(interval_from_rate(120.0f));
-	LL_APPEND(_streams, _parameters_manager);
-
-	/* MAVLINK_FTP stream */
-	_mavlink_ftp = (MavlinkFTP *) MavlinkFTP::new_instance(this);
-	_mavlink_ftp->set_interval(interval_from_rate(80.0f));
-	LL_APPEND(_streams, _mavlink_ftp);
-
-	/* MAVLINK_Log_Handler */
-	_mavlink_log_handler = (MavlinkLogHandler *) MavlinkLogHandler::new_instance(this);
-	_mavlink_log_handler->set_interval(interval_from_rate(80.0f));
-	LL_APPEND(_streams, _mavlink_log_handler);
-
-	/* MISSION_STREAM stream, actually sends all MISSION_XXX messages at some rate depending on
-	 * remote requests rate. Rate specified here controls how much bandwidth we will reserve for
-	 * mission messages. */
-	_mission_manager = (MavlinkMissionManager *) MavlinkMissionManager::new_instance(this);
-	_mission_manager->set_interval(interval_from_rate(10.0f));
-	_mission_manager->set_verbose(_verbose);
-	LL_APPEND(_streams, _mission_manager);
-
 	switch (_mode) {
 	case MAVLINK_MODE_NORMAL:
 		configure_stream("SYS_STATUS", 1.0f);
@@ -1998,11 +1996,12 @@ Mavlink::task_main(int argc, char *argv[])
 		configure_stream("COLLISION", 2.0f);
 		configure_stream("DISTANCE_SENSOR", 0.5f);
 		configure_stream("OPTICAL_FLOW_RAD", 1.0f);
-		configure_stream("VISION_POSITION_NED", 1.0f);
+		configure_stream("VISION_POSITION_ESTIMATE", 1.0f);
 		configure_stream("ESTIMATOR_STATUS", 0.5f);
 		configure_stream("NAV_CONTROLLER_OUTPUT", 1.5f);
 		configure_stream("GLOBAL_POSITION_INT", 5.0f);
 		configure_stream("LOCAL_POSITION_NED", 1.0f);
+		configure_stream("POSITION_TARGET_LOCAL_NED", 1.5f);
 		configure_stream("POSITION_TARGET_GLOBAL_INT", 1.5f);
 		configure_stream("ATTITUDE_TARGET", 2.0f);
 		configure_stream("HOME_POSITION", 0.5f);
@@ -2016,6 +2015,7 @@ Mavlink::task_main(int argc, char *argv[])
 		configure_stream("EXTENDED_SYS_STATE", 5.0f);
 		configure_stream("HIGHRES_IMU", 50.0f);
 		configure_stream("ATTITUDE", 250.0f);
+		configure_stream("ATTITUDE_QUATERNION", 50.0f);
 		configure_stream("RC_CHANNELS", 20.0f);
 		configure_stream("SERVO_OUTPUT_RAW_0", 10.0f);
 		configure_stream("ALTITUDE", 10.0f);
@@ -2024,7 +2024,7 @@ Mavlink::task_main(int argc, char *argv[])
 		configure_stream("COLLISION", 10.0f);
 		configure_stream("DISTANCE_SENSOR", 10.0f);
 		configure_stream("OPTICAL_FLOW_RAD", 10.0f);
-		configure_stream("VISION_POSITION_NED", 10.0f);
+		configure_stream("VISION_POSITION_ESTIMATE", 10.0f);
 		configure_stream("ESTIMATOR_STATUS", 1.0f);
 		configure_stream("NAV_CONTROLLER_OUTPUT", 10.0f);
 		configure_stream("GLOBAL_POSITION_INT", 50.0f);
@@ -2041,6 +2041,7 @@ Mavlink::task_main(int argc, char *argv[])
 		configure_stream("CAMERA_CAPTURE", 2.0f);
 		//camera trigger is rate limited at the source, do not limit here
 		configure_stream("CAMERA_TRIGGER", 500.0f);
+		configure_stream("CAMERA_IMAGE_CAPTURED", 5.0f);
 		configure_stream("ACTUATOR_CONTROL_TARGET0", 10.0f);
 		break;
 
@@ -2070,7 +2071,8 @@ Mavlink::task_main(int argc, char *argv[])
 		configure_stream("SYS_STATUS", 1.0f);
 		configure_stream("EXTENDED_SYS_STATE", 2.0f);
 		configure_stream("HIGHRES_IMU", 50.0f);
-		configure_stream("ATTITUDE", 100.0f);
+		configure_stream("ATTITUDE", 50.0f);
+		configure_stream("ATTITUDE_QUATERNION", 50.0f);
 		configure_stream("RC_CHANNELS", 10.0f);
 		configure_stream("SERVO_OUTPUT_RAW_0", 20.0f);
 		configure_stream("SERVO_OUTPUT_RAW_1", 20.0f);
@@ -2080,7 +2082,7 @@ Mavlink::task_main(int argc, char *argv[])
 		configure_stream("COLLISION", 20.0f);
 		configure_stream("DISTANCE_SENSOR", 10.0f);
 		configure_stream("OPTICAL_FLOW_RAD", 10.0f);
-		configure_stream("VISION_POSITION_NED", 10.0f);
+		configure_stream("VISION_POSITION_ESTIMATE", 10.0f);
 		configure_stream("ESTIMATOR_STATUS", 5.0f);
 		configure_stream("NAV_CONTROLLER_OUTPUT", 10.0f);
 		configure_stream("GLOBAL_POSITION_INT", 10.0f);
@@ -2092,7 +2094,7 @@ Mavlink::task_main(int argc, char *argv[])
 		configure_stream("VFR_HUD", 20.0f);
 		configure_stream("WIND_COV", 10.0f);
 		configure_stream("CAMERA_TRIGGER", 500.0f);
-		configure_stream("MISSION_ITEM", 50.0f);
+		configure_stream("CAMERA_IMAGE_CAPTURED", 5.0f);
 		configure_stream("ACTUATOR_CONTROL_TARGET0", 30.0f);
 		configure_stream("MANUAL_CONTROL", 5.0f);
 		break;
@@ -2141,8 +2143,6 @@ Mavlink::task_main(int argc, char *argv[])
 
 		update_rate_mult();
 
-		_mission_manager->check_active_mission();
-
 		if (param_sub->update(&param_time, nullptr)) {
 			/* parameters updated */
 			mavlink_update_system();
@@ -2183,7 +2183,9 @@ Mavlink::task_main(int argc, char *argv[])
 				// the file stream. Since this is a one-time
 				// config thing, we leave the file struct
 				// allocated.
-				//fclose(fs);
+#ifndef __PX4_NUTTX
+				fclose(fs);
+#endif
 
 			} else {
 				PX4_WARN("open fd %d failed", _uart_fd);
@@ -2221,13 +2223,15 @@ Mavlink::task_main(int argc, char *argv[])
 
 		/* check for shell output */
 		if (_mavlink_shell && _mavlink_shell->available() > 0) {
-			mavlink_serial_control_t msg;
-			msg.baudrate = 0;
-			msg.flags = SERIAL_CONTROL_FLAG_REPLY;
-			msg.timeout = 0;
-			msg.device = SERIAL_CONTROL_DEV_SHELL;
-			msg.count = _mavlink_shell->read(msg.data, sizeof(msg.data));
-			mavlink_msg_serial_control_send_struct(get_channel(), &msg);
+			if (get_free_tx_buf() >= MAVLINK_MSG_ID_SERIAL_CONTROL_LEN + MAVLINK_NUM_NON_PAYLOAD_BYTES) {
+				mavlink_serial_control_t msg;
+				msg.baudrate = 0;
+				msg.flags = SERIAL_CONTROL_FLAG_REPLY;
+				msg.timeout = 0;
+				msg.device = SERIAL_CONTROL_DEV_SHELL;
+				msg.count = _mavlink_shell->read(msg.data, sizeof(msg.data));
+				mavlink_msg_serial_control_send_struct(get_channel(), &msg);
+			}
 		}
 
 		/* check for ulog streaming messages */
@@ -2365,7 +2369,7 @@ Mavlink::task_main(int argc, char *argv[])
 	}
 
 	/* first wait for threads to complete before tearing down anything */
-	pthread_join(_receive_thread, NULL);
+	pthread_join(_receive_thread, nullptr);
 
 	delete _subscribe_to_stream;
 	_subscribe_to_stream = nullptr;

@@ -73,6 +73,11 @@ then
 	then
 	fi
 
+	# Internal SPI bus ICM-20602-G is rotated 90 deg yaw
+	if mpu6000 -R 2 -T 20602 start
+	then
+	fi
+
 	# Internal SPI bus ICM-20608-G is rotated 90 deg yaw
 	if mpu6000 -R 2 -T 20608 start
 	then
@@ -193,6 +198,11 @@ then
 	then
 	fi
 
+	# Internal SPI bus ICM-20602-G is rotated 90 deg yaw
+	if mpu6000 -R 2 -T 20602 start
+	then
+	fi
+
 	# Start either MPU9250 or BMI160. They are both connected to the same SPI bus and use the same
 	# chip select pin. There are different boards with either one of them and the WHO_AM_I register
 	# will prevent the incorrect driver from a successful initialization.
@@ -204,6 +214,30 @@ then
 
 	# Internal SPI bus BMI160
 	if bmi160 start
+	then
+	fi
+
+	# Start either ICM2060X or BMI055. They are both connected to the same SPI bus and use the same
+	# chip select pin. There are different boards with either one of them and the WHO_AM_I register
+	# will prevent the incorrect driver from a successful initialization.
+
+	# Internal SPI bus BMI055_ACC
+	if bmi055 -A start
+	then
+	fi
+
+	# Internal SPI bus BMI055_GYR
+	if bmi055 -G start
+	then
+	fi
+
+	# expansion i2c used for BMM150 rotated by 90deg
+	if bmm150 -R 2 start
+	then
+	fi
+
+	# expansion i2c used for BMP280
+	if bmp280 -I start
 	then
 	fi
 fi
@@ -249,11 +283,11 @@ then
 	fi
 
 	# Internal I2C bus
-	if hmc5883 -C -T -I -R 8 start
+	if hmc5883 -C -T -I -R 12 start
 	then
 	fi
 
-	if mpu6500 -R 8 start
+	if mpu9250 -s -R 8 start
 	then
 	fi
 
@@ -281,16 +315,11 @@ fi
 
 if ver hwcmp AEROFC_V1
 then
-	if ms5611 start
+	if ms5611 -T 0 start
 	then
 	fi
 
-	if mpu6500 -R 14 start
-	then
-	fi
-
-	# Internal compass
-	if hmc5883 -I -R 4 start
+	if mpu9250 -s -R 14 start
 	then
 	fi
 
@@ -302,12 +331,26 @@ then
 	if ist8310 -C -b 1 -R 4 start
 	then
 	fi
+
+	if aerofc_adc start
+	then
+	fi
+
+	if ll40ls start i2c
+	then
+	fi
 fi
 
 if ver hwcmp PX4FMU_V4PRO
 then
+
 	# Internal SPI bus ICM-20608-G
 	if mpu6000 -R 2 -T 20608 start
+	then
+	fi
+
+	# Internal SPI bus ICM-20602
+	if mpu6000 -R 2 -T 20602 start
 	then
 	fi
 
@@ -316,19 +359,21 @@ then
 	then
 	fi
 
-	# Possible external compasses
-	if hmc5883 -X start
+	# Internal SPI bus
+	if lis3mdl -R 0 start
 	then
 	fi
 
-	# Internal SPI bus
-	if lis3mdl -R 2 start
+	# Possible external compasses
+	if hmc5883 -C -T -X start
 	then
 	fi
+
 fi
 
 if ver hwcmp PX4FMU_V5
 then
+
 	# Internal SPI bus ICM-20602
 	if mpu6000 -R 8 -s -T 20602 start
 	then
@@ -339,31 +384,42 @@ then
 	then
 	fi
 
-	# Internal SPI bus BMI055
-# Place holder Need BMI055 Support added
-	if bmi055 -R 2 start
+	# Internal SPI bus BMI055 accel
+	if bmi055 -A -R 10 start
+	then
+	fi
+
+	# Internal SPI bus BMI055 gyro
+	if bmi055 -G -R 10 start
 	then
 	fi
 
 	# Possible external compasses
-	if hmc5883 -X start
+	if hmc5883 -C -T -X start
 	then
 	fi
 
-	if aerofc_adc start
+	# Possible external airspeed sensor
+	if meas_airspeed start -b 2
 	then
 	fi
+
 fi
 
-if meas_airspeed start
+if ver hwcmp AEROCORE2
+then
+	l3gd20 -R 12 start
+	lsm303d start
+fi
+
+if sdp3x_airspeed start
 then
 else
-	if ets_airspeed start
+	if meas_airspeed start
 	then
 	else
-		if ets_airspeed start -b 1
-		then
-		fi
+		ets_airspeed start
+		ets_airspeed start -b 1
 	fi
 fi
 

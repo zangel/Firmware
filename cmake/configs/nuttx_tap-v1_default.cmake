@@ -27,12 +27,12 @@ set(config_module_list
 	drivers/meas_airspeed
 	modules/sensors
 	drivers/vmount
-	drivers/camera_trigger
 
 	#
 	# System commands
 	#
 	systemcmds/bl_update
+	systemcmds/led_control
 	systemcmds/mixer
 	systemcmds/param
 	systemcmds/perf
@@ -79,7 +79,7 @@ set(config_module_list
 	#
 	# Library modules
 	#
-	modules/param
+	modules/systemlib/param
 	modules/systemlib
 	modules/systemlib/mixer
 	modules/uORB
@@ -97,6 +97,7 @@ set(config_module_list
 	lib/geo_lookup
 	lib/conversion
 	lib/launchdetection
+	lib/led
 	lib/rc
 	lib/runway_takeoff
 	lib/tailsitter_recovery

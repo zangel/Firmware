@@ -64,6 +64,7 @@ set(config_module_list
 	# General system control
 	#
 	modules/commander
+	modules/events
 	modules/load_mon
 	modules/navigator
 	modules/mavlink
@@ -97,7 +98,7 @@ set(config_module_list
 	#
 	# Library modules
 	#
-	modules/param
+	modules/systemlib/param
 	modules/systemlib
 	modules/systemlib/mixer
 	modules/uORB
@@ -115,6 +116,7 @@ set(config_module_list
 	lib/geo_lookup
 	lib/conversion
 	lib/launchdetection
+	lib/led
 	lib/terrain_estimation
 	lib/runway_takeoff
 	lib/tailsitter_recovery

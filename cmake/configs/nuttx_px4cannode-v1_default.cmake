@@ -1,6 +1,9 @@
 include(nuttx/px4_impl_nuttx)
 
-add_definitions(-DPARAM_NO_ORB)
+add_definitions(
+	-DPARAM_NO_ORB
+	-DPARAM_NO_AUTOSAVE
+	)
 
 px4_nuttx_configure(HWCLASS m3 CONFIG nsh)
 
@@ -52,7 +55,7 @@ set(config_module_list
 	#
 	# Library modules
 	#
-	modules/param
+	modules/systemlib/param
 	modules/systemlib
 	modules/uORB
 	lib/version

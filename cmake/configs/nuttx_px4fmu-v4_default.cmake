@@ -30,6 +30,7 @@ set(config_module_list
 	drivers/trone
 	drivers/gps
 	drivers/pwm_out_sim
+	drivers/pca9685
 	drivers/hott
 	drivers/hott/hott_telemetry
 	drivers/hott/hott_sensors
@@ -51,6 +52,8 @@ set(config_module_list
 	drivers/bmp280
 	drivers/bma180
 	drivers/bmi160
+	drivers/bmi055
+	drivers/bmm150
 	drivers/tap_esc
 	drivers/iridiumsbd
 
@@ -58,6 +61,7 @@ set(config_module_list
 	# System commands
 	#
 	systemcmds/bl_update
+	systemcmds/led_control
 	systemcmds/mixer
 	systemcmds/param
 	systemcmds/perf
@@ -82,7 +86,7 @@ set(config_module_list
 	drivers/test_ppm
 	modules/commander/commander_tests
 	modules/mc_pos_control/mc_pos_control_tests
-	modules/controllib_test
+	lib/controllib/controllib_test
 	modules/mavlink/mavlink_tests
 	modules/unit_test
 	modules/uORB/uORB_tests
@@ -92,12 +96,14 @@ set(config_module_list
 	# General system control
 	#
 	modules/commander
+	modules/events
 	modules/load_mon
 	modules/navigator
 	modules/mavlink
 	modules/gpio_led
 	modules/uavcan
 	modules/land_detector
+	modules/camera_feedback
 
 	#
 	# Estimation modules (EKF/ SO3 / other filters)
@@ -110,9 +116,10 @@ set(config_module_list
 	#
 	# Vehicle Control
 	#
-	# modules/segway # XXX Needs GCC 4.7 fix
-	modules/fw_pos_control_l1
 	modules/fw_att_control
+	modules/fw_pos_control_l1
+	modules/gnd_att_control
+	modules/gnd_pos_control
 	modules/mc_att_control
 	modules/mc_pos_control
 	modules/vtol_att_control
@@ -126,7 +133,7 @@ set(config_module_list
 	#
 	# Library modules
 	#
-	modules/param
+	modules/systemlib/param
 	modules/systemlib
 	modules/systemlib/mixer
 	modules/uORB
@@ -145,6 +152,7 @@ set(config_module_list
 	lib/geo_lookup
 	lib/conversion
 	lib/launchdetection
+	lib/led
 	lib/terrain_estimation
 	lib/runway_takeoff
 	lib/tailsitter_recovery
@@ -184,7 +192,7 @@ set(config_module_list
 
 	# Tutorial code from
 	# https://px4.io/dev/example_fixedwing_control
-	#examples/fixedwing_control
+	examples/fixedwing_control
 
 	# Hardware test
 	#examples/hwtest

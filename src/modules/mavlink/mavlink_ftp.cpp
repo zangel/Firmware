@@ -55,14 +55,11 @@ void seekdir(DIR *dir, long loc)
 // Uncomment the line below to get better debug output. Never commit with this left on.
 //#define MAVLINK_FTP_DEBUG
 
-int buf_size_1 = 0;
-int buf_size_2 = 0;
-
 MavlinkFTP::MavlinkFTP(Mavlink *mavlink) :
-	MavlinkStream(mavlink),
 	_session_info{},
 	_utRcvMsgFunc{},
-	_worker_data{}
+	_worker_data{},
+	_mavlink(mavlink)
 {
 	// initialize session
 	_session_info.fd = -1;
@@ -73,20 +70,8 @@ MavlinkFTP::~MavlinkFTP()
 
 }
 
-const char *
-MavlinkFTP::get_name(void) const
-{
-	return "MAVLINK_FTP";
-}
-
-uint16_t
-MavlinkFTP::get_id(void)
-{
-	return MAVLINK_MSG_ID_FILE_TRANSFER_PROTOCOL;
-}
-
 unsigned
-MavlinkFTP::get_size(void)
+MavlinkFTP::get_size()
 {
 	if (_session_info.stream_download) {
 		return MAVLINK_MSG_ID_FILE_TRANSFER_PROTOCOL_LEN + MAVLINK_NUM_NON_PAYLOAD_BYTES;
@@ -94,12 +79,6 @@ MavlinkFTP::get_size(void)
 	} else {
 		return 0;
 	}
-}
-
-MavlinkStream *
-MavlinkFTP::new_instance(Mavlink *mavlink)
-{
-	return new MavlinkFTP(mavlink);
 }
 
 #ifdef MAVLINK_FTP_UNIT_TEST
@@ -112,7 +91,7 @@ MavlinkFTP::set_unittest_worker(ReceiveMessageFunc_t rcvMsgFunc, void *worker_da
 #endif
 
 uint8_t
-MavlinkFTP::_getServerSystemId(void)
+MavlinkFTP::_getServerSystemId()
 {
 #ifdef MAVLINK_FTP_UNIT_TEST
 	// We use fake ids when unit testing
@@ -124,7 +103,7 @@ MavlinkFTP::_getServerSystemId(void)
 }
 
 uint8_t
-MavlinkFTP::_getServerComponentId(void)
+MavlinkFTP::_getServerComponentId()
 {
 #ifdef MAVLINK_FTP_UNIT_TEST
 	// We use fake ids when unit testing
@@ -136,7 +115,7 @@ MavlinkFTP::_getServerComponentId(void)
 }
 
 uint8_t
-MavlinkFTP::_getServerChannel(void)
+MavlinkFTP::_getServerChannel()
 {
 #ifdef MAVLINK_FTP_UNIT_TEST
 	// We use fake ids when unit testing
@@ -313,6 +292,8 @@ MavlinkFTP::_workList(PayloadHeader *payload, bool list_hidden)
 {
 	char dirPath[kMaxDataLength];
 	strncpy(dirPath, _data_as_cstring(payload), kMaxDataLength);
+	// ensure termination
+	dirPath[sizeof(dirPath) - 1] = '\0';
 
 	ErrorCode errorCode = kErrNone;
 	unsigned offset = 0;
@@ -428,7 +409,7 @@ MavlinkFTP::_workList(PayloadHeader *payload, bool list_hidden)
 		} else {
 			// Everything else just sends name
 			strncpy(buf, result->d_name, sizeof(buf));
-			buf[sizeof(buf) - 1] = 0;
+			buf[sizeof(buf) - 1] = '\0';
 		}
 
 		size_t nameLen = strlen(buf);
@@ -592,6 +573,8 @@ MavlinkFTP::_workRemoveFile(PayloadHeader *payload)
 {
 	char file[kMaxDataLength];
 	strncpy(file, _data_as_cstring(payload), kMaxDataLength);
+	// ensure termination
+	file[sizeof(file) - 1] = '\0';
 
 	if (unlink(file) == 0) {
 		payload->size = 0;
@@ -609,6 +592,8 @@ MavlinkFTP::_workTruncateFile(PayloadHeader *payload)
 	char file[kMaxDataLength];
 	const char temp_file[] = PX4_ROOTFSDIR"/fs/microsd/.trunc.tmp";
 	strncpy(file, _data_as_cstring(payload), kMaxDataLength);
+	// ensure termination
+	file[sizeof(file) - 1] = '\0';
 	payload->size = 0;
 
 	// emulate truncate(file, payload->offset) by
@@ -731,7 +716,11 @@ MavlinkFTP::_workRename(PayloadHeader *payload)
 	}
 
 	strncpy(oldpath, ptr, kMaxDataLength);
+	// ensure termination
+	oldpath[sizeof(oldpath) - 1] = '\0';
 	strncpy(newpath, ptr + oldpath_sz + 1, kMaxDataLength);
+	// ensure termination
+	newpath[sizeof(newpath) - 1] = '\0';
 
 	if (rename(oldpath, newpath) == 0) {
 		payload->size = 0;
@@ -748,6 +737,8 @@ MavlinkFTP::_workRemoveDirectory(PayloadHeader *payload)
 {
 	char dir[kMaxDataLength];
 	strncpy(dir, _data_as_cstring(payload), kMaxDataLength);
+	// ensure termination
+	dir[sizeof(dir) - 1] = '\0';
 
 	if (rmdir(dir) == 0) {
 		payload->size = 0;
@@ -764,6 +755,8 @@ MavlinkFTP::_workCreateDirectory(PayloadHeader *payload)
 {
 	char dir[kMaxDataLength];
 	strncpy(dir, _data_as_cstring(payload), kMaxDataLength);
+	// ensure termination
+	dir[sizeof(dir) - 1] = '\0';
 
 	if (mkdir(dir, S_IRWXU | S_IRWXG | S_IRWXO) == 0) {
 		payload->size = 0;
@@ -782,6 +775,8 @@ MavlinkFTP::_workCalcFileCRC32(PayloadHeader *payload)
 	uint32_t checksum = 0;
 	ssize_t bytes_read;
 	strncpy(file_buf, _data_as_cstring(payload), kMaxDataLength);
+	// ensure termination
+	file_buf[sizeof(file_buf) - 1] = '\0';
 
 	int fd = ::open(file_buf, O_RDONLY);
 

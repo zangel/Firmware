@@ -43,7 +43,7 @@
 #include <sys/socket.h>
 #include <netinet/in.h>
 #include <pthread.h>
-
+#include <conversion/rotation.h>
 #include <mathlib/mathlib.h>
 
 extern "C" __EXPORT hrt_abstime hrt_reset(void);
@@ -150,7 +150,7 @@ void Simulator::pack_actuator_message(mavlink_hil_actuator_controls_t &msg, unsi
 
 		for (unsigned i = 0; i < 16; i++) {
 			if (_actuators[index].output[i] > PWM_DEFAULT_MIN / 2) {
-				if (i != 3) {
+				if (i != 4) {
 					/* scale PWM out PWM_DEFAULT_MIN..PWM_DEFAULT_MAX us to -1..1 for normal channels */
 					msg.controls[i] = (_actuators[index].output[i] - pwm_center) / ((PWM_DEFAULT_MAX - PWM_DEFAULT_MIN) / 2);
 
@@ -253,14 +253,14 @@ void Simulator::update_sensors(mavlink_hil_sensor_t *imu)
 
 	RawAirspeedData airspeed = {};
 	airspeed.temperature = imu->temperature;
-	airspeed.diff_pressure = imu->diff_pressure;
+	airspeed.diff_pressure = imu->diff_pressure + 0.001f * (hrt_absolute_time() & 0x01);;
 
 	write_airspeed_data(&airspeed);
 }
 
 void Simulator::update_gps(mavlink_hil_gps_t *gps_sim)
 {
-	RawGPSData gps;
+	RawGPSData gps = {};
 	gps.lat = gps_sim->lat;
 	gps.lon = gps_sim->lon;
 	gps.alt = gps_sim->alt;
@@ -386,12 +386,8 @@ void Simulator::handle_message(mavlink_message_t *msg, bool publish)
 		{
 			hil_attitude.timestamp = timestamp;
 
-			math::Quaternion q(hil_state.attitude_quaternion);
-
-			hil_attitude.q[0] = q(0);
-			hil_attitude.q[1] = q(1);
-			hil_attitude.q[2] = q(2);
-			hil_attitude.q[3] = q(3);
+			matrix::Quatf q(hil_state.attitude_quaternion);
+			q.copyTo(hil_attitude.q);
 
 			hil_attitude.rollspeed = hil_state.rollspeed;
 			hil_attitude.pitchspeed = hil_state.pitchspeed;
@@ -408,9 +404,9 @@ void Simulator::handle_message(mavlink_message_t *msg, bool publish)
 			hil_gpos.timestamp = timestamp;
 
 			hil_gpos.time_utc_usec = timestamp;
-			hil_gpos.lat = hil_state.lat;
-			hil_gpos.lon = hil_state.lon;
-			hil_gpos.alt = hil_state.alt / 1000.0f;
+			hil_gpos.lat = hil_state.lat / 1E7;//1E7
+			hil_gpos.lon = hil_state.lon / 1E7;//1E7
+			hil_gpos.alt = hil_state.alt / 1E3;//1E3
 
 			hil_gpos.vel_n = hil_state.vx / 100.0f;
 			hil_gpos.vel_e = hil_state.vy / 100.0f;
@@ -532,7 +528,7 @@ void Simulator::poll_topics()
 	}
 }
 
-void *Simulator::sending_trampoline(void *)
+void *Simulator::sending_trampoline(void * /*unused*/)
 {
 	_instance->send();
 	return nullptr;
@@ -623,7 +619,9 @@ void Simulator::pollForMAVLinkMessages(bool publish, int udp_port)
 	struct sockaddr_in _myaddr;
 
 	if (udp_port < 1) {
-		udp_port = UDP_PORT;
+		int prt;
+		param_get(param_find("SITL_UDP_PRT"), &prt);
+		udp_port = prt;
 	}
 
 	// try to setup udp socket for communcation with simulator
@@ -719,7 +717,7 @@ void Simulator::pollForMAVLinkMessages(bool publish, int udp_port)
 						handle_message(&msg, publish);
 
 						if (msg.msgid != 0 && (hrt_system_time() - pstart_time > 1000000)) {
-							PX4_INFO("Got initial simuation data, running sim..");
+							PX4_INFO("Got initial simulation data, running sim..");
 							no_sim_data = false;
 						}
 					}
@@ -744,7 +742,7 @@ void Simulator::pollForMAVLinkMessages(bool publish, int udp_port)
 	_vehicle_status_sub = orb_subscribe(ORB_ID(vehicle_status));
 
 	// got data from simulator, now activate the sending thread
-	pthread_create(&sender_thread, &sender_thread_attr, Simulator::sending_trampoline, NULL);
+	pthread_create(&sender_thread, &sender_thread_attr, Simulator::sending_trampoline, nullptr);
 	pthread_attr_destroy(&sender_thread_attr);
 
 	mavlink_status_t udp_status = {};
@@ -1046,6 +1044,14 @@ int Simulator::publish_flow_topic(mavlink_hil_optical_flow_t *flow_mavlink)
 	flow.pixel_flow_x_integral = flow_mavlink->integrated_x;
 	flow.pixel_flow_y_integral = flow_mavlink->integrated_y;
 	flow.quality = flow_mavlink->quality;
+
+	/* rotate measurements according to parameter */
+	enum Rotation flow_rot;
+	param_get(param_find("SENS_FLOW_ROT"), &flow_rot);
+
+	float zeroval = 0.0f;
+	rotate_3f(flow_rot, flow.pixel_flow_x_integral, flow.pixel_flow_y_integral, zeroval);
+	rotate_3f(flow_rot, flow.gyro_x_rate_integral, flow.gyro_y_rate_integral, flow.gyro_z_rate_integral);
 
 	int flow_multi;
 	orb_publish_auto(ORB_ID(optical_flow), &_flow_pub, &flow, &flow_multi, ORB_PRIO_HIGH);
